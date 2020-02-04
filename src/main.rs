@@ -5,9 +5,6 @@ use gilrs::{Axis, Button, EventType, Gilrs};
 
 use serial::prelude::*;
 
-#[macro_use(block)]
-extern crate nb;
-
 use std::io::Write;
 
 use std::env::args;
@@ -78,9 +75,47 @@ fn build_ui(application: &gtk::Application) {
     timeout_add(20, move || {
         // Show current Input State to GUI
         while let Some(env) = gilrs.next_event() {
-            // let env = dbg!(env);
-            if let EventType::AxisChanged(Axis::Unknown, value, ..) = env.event {
-                stick_throttle.set_fraction(1.0 * (-value as f64 + 1.0) / 2.0);
+            use EventType::*;
+            match env.event {
+                AxisChanged(Axis::Unknown, value, ..) => {
+                    stick_throttle.set_fraction(1.0 * (-value as f64 + 1.0) / 2.0);
+                }
+                ButtonPressed(Button::LeftTrigger, _) => {
+                    let mut msg = heapless::Vec::<u8, heapless::consts::U32>::new();
+                    copter_defs::Command::ToggleLed
+                        .to_slip(&mut msg)
+                        .and_then(|_| {
+                            port.write_all(msg.as_ref()).unwrap();
+                            Ok(())
+                        })
+                        .unwrap();
+                }
+                ButtonPressed(Button::RightTrigger, _) => {
+                    let mut msg = heapless::Vec::<u8, heapless::consts::U32>::new();
+                    copter_defs::Command::GetMotionState
+                        .to_slip(&mut msg)
+                        .and_then(|_| {
+                            port.write_all(msg.as_ref()).unwrap();
+                            Ok(())
+                        })
+                        .expect("Unable to decode GetMotionStateCommand");
+                    use std::io::Read;
+                    let mut msg_buffer = [0; 64];
+                    msg.clear();
+                    while let Ok(len) = port.read(&mut msg_buffer) {
+                        // Read Until Error occured
+                        for byte in msg_buffer[..len].iter() {
+                            if *byte == rc_framing::framing::END {
+                                if let Ok(cmd) = copter_defs::Command::from_slip(&msg) {
+                                    println!("{:#?}", cmd);
+                                }
+                            } else {
+                                msg.push(*byte).unwrap();
+                            };
+                        }
+                    }
+                }
+                _ => (),
             };
         }
         button_a.set_active(gilrs.gamepad(gamepad.unwrap()).is_pressed(Button::South));
@@ -121,8 +156,6 @@ fn build_ui(application: &gtk::Application) {
         }
         if let Some(axis_data) = gilrs.gamepad(gamepad.unwrap()).axis_data(Axis::LeftStickY) {
             stick_left_h.set_fraction((axis_data.value() as f64 + 1.0) / 2.0);
-            port.write(&[((axis_data.value() + 1.0) / 2.0 * 255.0) as u8])
-                .ok();
         }
         if let Some(axis_data) = gilrs.gamepad(gamepad.unwrap()).axis_data(Axis::RightStickX) {
             stick_right_v.set_fraction((axis_data.value() as f64 + 1.0) / 2.0);
