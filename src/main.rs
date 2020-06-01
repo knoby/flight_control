@@ -10,7 +10,7 @@ use tui::{
     backend::TermionBackend,
     layout::{Constraint, Direction, Layout},
     style::{Color, Modifier, Style},
-    widgets::{Block, Borders, Gauge},
+    widgets::{Block, Borders, Gauge, Paragraph, Text},
     Terminal,
 };
 
@@ -18,17 +18,41 @@ use tui::{
 mod util;
 use util::event::{Event, Events};
 
-#[derive(Debug)]
-struct App {}
+struct App {
+    update_counter: u32,
+    rx_counter: u32,
+    tx_counter: u32,
+    serial_port: Box<dyn SerialPort>,
+}
 
 impl App {
     /// Create a new Instance of the application
-    fn new() -> Self {
-        App {}
+    fn new(serial_port: Box<dyn SerialPort>) -> Self {
+        App {
+            update_counter: 0,
+            rx_counter: 0,
+            tx_counter: 0,
+            serial_port,
+        }
     }
 
     /// Update the Input State and and read/send data to serial
-    fn update(&mut self, gamepad: &mut Gilrs) {}
+    fn update(&mut self) {
+        // Track number of updates
+        self.update_counter += 1;
+    }
+
+    /// Handle Key Input
+    fn handle_key_input(&mut self, key: Key) {
+        match key {
+            Key::Char('t') => {
+                // Recived Toggle LED Key for debuging things
+                let send_data = copter_defs::Command::ToggleLed.to_slip();
+                self.serial_port.as_mut().write(&send_data);
+            }
+            _ => (),
+        }
+    }
 
     /// Draw the status of the app to the screen
     fn draw<T>(&mut self, terminal: &mut Terminal<TermionBackend<T>>) -> Result<(), std::io::Error>
@@ -37,8 +61,13 @@ impl App {
     {
         terminal.draw(|mut f| {
             let size = f.size();
-            let block = Block::default().title("Block").borders(Borders::ALL);
-            f.render_widget(block, size);
+            let text = [
+                Text::raw(format!("Update Counter: {}\n", self.update_counter)),
+                Text::raw(format!("TX Counter: {}\n", self.tx_counter)),
+                Text::raw(format!("RX Counter: {}\n", self.rx_counter)),
+            ];
+            let par = Paragraph::new(text.iter());
+            f.render_widget(par, size)
         })
     }
 }
@@ -61,7 +90,7 @@ fn main() -> Result<(), Box<dyn Error>> {
             port.set_timeout(std::time::Duration::from_millis(10))?;
             Ok(port)
         })
-        .map_err(|_| format!("Unable to init serial communication"));
+        .map_err(|_| format!("Unable to init serial communication"))?;
 
     // Create new Window
     // Terminal initialization
@@ -74,17 +103,16 @@ fn main() -> Result<(), Box<dyn Error>> {
 
     let events = Events::new();
 
-    let mut app = App::new();
+    let mut app = App::new(Box::new(port));
 
     loop {
         match events.next()? {
-            Event::Input(input) => {
-                if input == Key::Char('q') {
-                    break;
-                }
+            Event::Input(Key::Char('q')) => {
+                break;
             }
+            Event::Input(key) => app.handle_key_input(key),
             Event::Tick => {
-                app.update(&mut gilrs);
+                app.update();
             }
         }
 
