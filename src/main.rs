@@ -22,7 +22,8 @@ struct App<'a> {
     tab_state: util::TabsState<'a>,
     pitch: Vec<f32>,
     roll: Vec<f32>,
-    motor: copter_defs::MotorState,
+    act_motor: copter_defs::MotorState,
+    set_motor: copter_defs::MotorState,
 }
 
 impl<'a> App<'a> {
@@ -37,7 +38,8 @@ impl<'a> App<'a> {
             tab_state,
             pitch: Vec::new(),
             roll: Vec::new(),
-            motor: copter_defs::MotorState::default(),
+            act_motor: copter_defs::MotorState::default(),
+            set_motor: copter_defs::MotorState::default(),
         }
     }
 
@@ -61,7 +63,7 @@ impl<'a> App<'a> {
                 msg.rotate_left(1);
                 msg.pop();
             }
-            if let Ok(copter_defs::Command::SendMotionState(state, armed)) =
+            if let Ok(copter_defs::Command::SendMotionState(state, motor_speed, armed)) =
                 copter_defs::Command::from_slip(&msg)
             {
                 self.roll
@@ -76,7 +78,12 @@ impl<'a> App<'a> {
                     self.pitch.rotate_left(1);
                     self.pitch.pop();
                 }
-                self.motor.armed = armed;
+                self.act_motor.front_left = motor_speed[0];
+                self.act_motor.front_right = motor_speed[1];
+                self.act_motor.rear_left = motor_speed[2];
+                self.act_motor.rear_right = motor_speed[3];
+                self.act_motor.armed = armed;
+                self.set_motor = self.act_motor;
             }
         }
     }
@@ -93,14 +100,87 @@ impl<'a> App<'a> {
     /// Handle all keys from input chain
     fn handle_key(&mut self, key: termion::event::Key) {
         match key {
-            Key::PageUp => self.tab_state.next(),
-            Key::PageDown => self.tab_state.previous(),
+            Key::Char('.') => self.tab_state.next(),
+            Key::Char(',') => self.tab_state.previous(),
             Key::Char('s') => {
-                if self.motor.armed {
+                if self.set_motor.armed {
                     self.send_op_code(copter_defs::Command::StopMotor);
                 } else {
                     self.send_op_code(copter_defs::Command::StartMotor);
-                }
+                };
+                self.set_motor.armed = !self.set_motor.armed;
+            }
+            Key::Char('u') => {
+                self.set_motor.rear_left += 1.0;
+                self.set_motor.rear_right += 1.0;
+                self.set_motor.front_left += 1.0;
+                self.set_motor.front_right += 1.0;
+                self.send_op_code(copter_defs::Command::SetTargetMotorSpeed([
+                    self.set_motor.front_left,
+                    self.set_motor.front_right,
+                    self.set_motor.rear_left,
+                    self.set_motor.rear_right,
+                ]))
+            }
+            Key::Char('o') => {
+                self.set_motor.rear_left -= 1.0;
+                self.set_motor.rear_right -= 1.0;
+                self.set_motor.front_left -= 1.0;
+                self.set_motor.front_right -= 1.0;
+                self.send_op_code(copter_defs::Command::SetTargetMotorSpeed([
+                    self.set_motor.front_left,
+                    self.set_motor.front_right,
+                    self.set_motor.rear_left,
+                    self.set_motor.rear_right,
+                ]))
+            }
+            Key::Char('i') => {
+                self.set_motor.rear_left += 1.0;
+                self.set_motor.rear_right += 1.0;
+                self.set_motor.front_left -= 1.0;
+                self.set_motor.front_right -= 1.0;
+                self.send_op_code(copter_defs::Command::SetTargetMotorSpeed([
+                    self.set_motor.front_left,
+                    self.set_motor.front_right,
+                    self.set_motor.rear_left,
+                    self.set_motor.rear_right,
+                ]))
+            }
+            Key::Char('k') => {
+                self.set_motor.rear_left -= 1.0;
+                self.set_motor.rear_right -= 1.0;
+                self.set_motor.front_left += 1.0;
+                self.set_motor.front_right += 1.0;
+                self.send_op_code(copter_defs::Command::SetTargetMotorSpeed([
+                    self.set_motor.front_left,
+                    self.set_motor.front_right,
+                    self.set_motor.rear_left,
+                    self.set_motor.rear_right,
+                ]))
+            }
+            Key::Char('j') => {
+                self.set_motor.rear_left -= 1.0;
+                self.set_motor.rear_right += 1.0;
+                self.set_motor.front_left -= 1.0;
+                self.set_motor.front_right += 1.0;
+                self.send_op_code(copter_defs::Command::SetTargetMotorSpeed([
+                    self.set_motor.front_left,
+                    self.set_motor.front_right,
+                    self.set_motor.rear_left,
+                    self.set_motor.rear_right,
+                ]))
+            }
+            Key::Char('l') => {
+                self.set_motor.rear_left += 1.0;
+                self.set_motor.rear_right -= 1.0;
+                self.set_motor.front_left += 1.0;
+                self.set_motor.front_right -= 1.0;
+                self.send_op_code(copter_defs::Command::SetTargetMotorSpeed([
+                    self.set_motor.front_left,
+                    self.set_motor.front_right,
+                    self.set_motor.rear_left,
+                    self.set_motor.rear_right,
+                ]))
             }
             _ => (),
         }
@@ -168,28 +248,28 @@ impl<'a> App<'a> {
             .split(layout_motors[2]);
         // Draw gauge with sample data
         let motor_fl = Gauge::default()
-            .percent(self.motor.front_left as u16)
+            .percent(self.act_motor.front_left as u16)
             .block(Block::default().borders(Borders::ALL).title("Front Left"))
-            .style(Style::new().fg(if self.motor.armed {
+            .style(Style::new().fg(if self.act_motor.armed {
                 Color::LightGreen
             } else {
                 Color::LightRed
             }));
         let motor_fr = motor_fl
             .clone()
-            .percent(self.motor.front_right as u16)
+            .percent(self.act_motor.front_right as u16)
             .block(Block::default().borders(Borders::ALL).title("Front Right"));
         let motor_rl = motor_fl
             .clone()
-            .percent(self.motor.rear_left as u16)
+            .percent(self.act_motor.rear_left as u16)
             .block(Block::default().borders(Borders::ALL).title("Rear Left"));
         let motor_rr = motor_fl
             .clone()
-            .percent(self.motor.rear_right as u16)
+            .percent(self.act_motor.rear_right as u16)
             .block(Block::default().borders(Borders::ALL).title("Rear Right"));
         f.render_widget(motor_fl.clone(), layout_motor_state_left[0]);
-        f.render_widget(motor_fr.clone(), layout_motor_state_left[1]);
-        f.render_widget(motor_rl.clone(), layout_motor_state_right[0]);
+        f.render_widget(motor_rl.clone(), layout_motor_state_left[1]);
+        f.render_widget(motor_fr.clone(), layout_motor_state_right[0]);
         f.render_widget(motor_rr.clone(), layout_motor_state_right[1]);
 
         // Area in which the Pitch and Roll anlge is plotted over time
