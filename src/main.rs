@@ -19,6 +19,7 @@ struct App<'a> {
     update_counter: u32,
     tx_counter: u32,
     serial_port: Box<dyn SerialPort>,
+    gamepad: gilrs::Gilrs,
     tab_state: util::TabsState<'a>,
     pitch: Vec<f32>,
     roll: Vec<f32>,
@@ -28,12 +29,13 @@ struct App<'a> {
 
 impl<'a> App<'a> {
     /// Create a new Instance of the application
-    fn new(serial_port: Box<dyn SerialPort>) -> Self {
+    fn new(serial_port: Box<dyn SerialPort>, gamepad: gilrs::Gilrs) -> Self {
         // Create Interface
         let tab_state = util::TabsState::new(vec!["Main", "Connection", "Info"]);
         App {
             update_counter: 0,
             tx_counter: 0,
+            gamepad,
             serial_port,
             tab_state,
             pitch: Vec::new(),
@@ -51,40 +53,46 @@ impl<'a> App<'a> {
             self.send_op_code(copter_defs::Command::ToggleLed);
         }
         if self.update_counter % 5 == 0 {
-            self.send_op_code(copter_defs::Command::GetMotionState);
-            // Try to get the answer
-            let mut msg = Vec::new();
-            let mut buf = [0u8; 32];
-            while let Ok(n) = self.serial_port.read(&mut buf) {
-                buf.iter().take(n).for_each(|&byte| msg.push(byte));
+            self.update_motion_state();
+        }
+        // Handle Gampad Input
+        self.handle_gamepad();
+    }
+
+    /// Update the current motion state of the quadrocopter
+    fn update_motion_state(&mut self) {
+        self.send_op_code(copter_defs::Command::GetMotionState);
+        // Try to get the answer
+        let mut msg = Vec::new();
+        let mut buf = [0u8; 32];
+        while let Ok(n) = self.serial_port.read(&mut buf) {
+            buf.iter().take(n).for_each(|&byte| msg.push(byte));
+        }
+        if msg.len() >= 2 {
+            msg.pop();
+            msg.rotate_left(1);
+            msg.pop();
+        }
+        if let Ok(copter_defs::Command::SendMotionState(state, motor_speed, armed)) =
+            copter_defs::Command::from_slip(&msg)
+        {
+            self.roll
+                .push(state[0] / (2.0 * std::f32::consts::PI) * 360.0);
+            if self.roll.len() > 20 {
+                self.roll.rotate_left(1);
+                self.roll.pop();
             }
-            if msg.len() >= 2 {
-                msg.pop();
-                msg.rotate_left(1);
-                msg.pop();
+            self.pitch
+                .push(state[1] / (2.0 * std::f32::consts::PI) * 360.0);
+            if self.pitch.len() > 20 {
+                self.pitch.rotate_left(1);
+                self.pitch.pop();
             }
-            if let Ok(copter_defs::Command::SendMotionState(state, motor_speed, armed)) =
-                copter_defs::Command::from_slip(&msg)
-            {
-                self.roll
-                    .push(state[0] / (2.0 * std::f32::consts::PI) * 360.0);
-                if self.roll.len() > 20 {
-                    self.roll.rotate_left(1);
-                    self.roll.pop();
-                }
-                self.pitch
-                    .push(state[1] / (2.0 * std::f32::consts::PI) * 360.0);
-                if self.pitch.len() > 20 {
-                    self.pitch.rotate_left(1);
-                    self.pitch.pop();
-                }
-                self.act_motor.front_left = motor_speed[0];
-                self.act_motor.front_right = motor_speed[1];
-                self.act_motor.rear_left = motor_speed[2];
-                self.act_motor.rear_right = motor_speed[3];
-                self.act_motor.armed = armed;
-                self.set_motor = self.act_motor;
-            }
+            self.act_motor.front_left = motor_speed[0];
+            self.act_motor.front_right = motor_speed[1];
+            self.act_motor.rear_left = motor_speed[2];
+            self.act_motor.rear_right = motor_speed[3];
+            self.act_motor.armed = armed;
         }
     }
 
@@ -97,8 +105,32 @@ impl<'a> App<'a> {
         self.serial_port.write_all(&send_data).unwrap();
     }
 
+    /// Handle the Input of Gamepad
+    fn handle_gamepad(&mut self) {
+        let mut update = false;
+        while let Some(event) = self.gamepad.next_event() {
+            match event {
+                gilrs::Event {
+                    id: _,
+                    event: gilrs::EventType::AxisChanged(gilrs::ev::Axis::LeftStickY, axis_value, _),
+                    time: _,
+                } => {}
+                _ => (),
+            }
+        }
+        if update {
+            self.send_op_code(copter_defs::Command::SetTargetMotorSpeed([
+                self.set_motor.front_left,
+                self.set_motor.front_right,
+                self.set_motor.rear_left,
+                self.set_motor.rear_right,
+            ]))
+        };
+    }
+
     /// Handle all keys from input chain
     fn handle_key(&mut self, key: termion::event::Key) {
+        let mut update = true;
         match key {
             Key::Char('.') => self.tab_state.next(),
             Key::Char(',') => self.tab_state.previous(),
@@ -115,75 +147,51 @@ impl<'a> App<'a> {
                 self.set_motor.rear_right += 1.0;
                 self.set_motor.front_left += 1.0;
                 self.set_motor.front_right += 1.0;
-                self.send_op_code(copter_defs::Command::SetTargetMotorSpeed([
-                    self.set_motor.front_left,
-                    self.set_motor.front_right,
-                    self.set_motor.rear_left,
-                    self.set_motor.rear_right,
-                ]))
             }
             Key::Char('o') => {
                 self.set_motor.rear_left -= 1.0;
                 self.set_motor.rear_right -= 1.0;
                 self.set_motor.front_left -= 1.0;
                 self.set_motor.front_right -= 1.0;
-                self.send_op_code(copter_defs::Command::SetTargetMotorSpeed([
-                    self.set_motor.front_left,
-                    self.set_motor.front_right,
-                    self.set_motor.rear_left,
-                    self.set_motor.rear_right,
-                ]))
             }
             Key::Char('i') => {
                 self.set_motor.rear_left += 1.0;
                 self.set_motor.rear_right += 1.0;
                 self.set_motor.front_left -= 1.0;
                 self.set_motor.front_right -= 1.0;
-                self.send_op_code(copter_defs::Command::SetTargetMotorSpeed([
-                    self.set_motor.front_left,
-                    self.set_motor.front_right,
-                    self.set_motor.rear_left,
-                    self.set_motor.rear_right,
-                ]))
             }
             Key::Char('k') => {
                 self.set_motor.rear_left -= 1.0;
                 self.set_motor.rear_right -= 1.0;
                 self.set_motor.front_left += 1.0;
                 self.set_motor.front_right += 1.0;
-                self.send_op_code(copter_defs::Command::SetTargetMotorSpeed([
-                    self.set_motor.front_left,
-                    self.set_motor.front_right,
-                    self.set_motor.rear_left,
-                    self.set_motor.rear_right,
-                ]))
             }
             Key::Char('j') => {
                 self.set_motor.rear_left -= 1.0;
                 self.set_motor.rear_right += 1.0;
                 self.set_motor.front_left -= 1.0;
                 self.set_motor.front_right += 1.0;
-                self.send_op_code(copter_defs::Command::SetTargetMotorSpeed([
-                    self.set_motor.front_left,
-                    self.set_motor.front_right,
-                    self.set_motor.rear_left,
-                    self.set_motor.rear_right,
-                ]))
             }
             Key::Char('l') => {
                 self.set_motor.rear_left += 1.0;
                 self.set_motor.rear_right -= 1.0;
                 self.set_motor.front_left += 1.0;
                 self.set_motor.front_right -= 1.0;
-                self.send_op_code(copter_defs::Command::SetTargetMotorSpeed([
-                    self.set_motor.front_left,
-                    self.set_motor.front_right,
-                    self.set_motor.rear_left,
-                    self.set_motor.rear_right,
-                ]))
             }
-            _ => (),
-        }
+            _ => update = false,
+        };
+        if update {
+            self.set_motor.front_left = self.set_motor.front_left.min(100.0).max(0.0);
+            self.set_motor.front_right = self.set_motor.front_right.min(100.0).max(0.0);
+            self.set_motor.rear_left = self.set_motor.rear_left.min(100.0).max(0.0);
+            self.set_motor.rear_right = self.set_motor.rear_right.min(100.0).max(0.0);
+            self.send_op_code(copter_defs::Command::SetTargetMotorSpeed([
+                self.set_motor.front_left,
+                self.set_motor.front_right,
+                self.set_motor.rear_left,
+                self.set_motor.rear_right,
+            ]))
+        };
     }
 
     /// Render the Connection tab
@@ -363,7 +371,7 @@ impl<'a> App<'a> {
 
 fn main() -> Result<(), Box<dyn Error>> {
     // Gamepad Input
-    let _gilrs = Gilrs::new().map_err(|_| "Unable to init gamepad system".to_string())?;
+    let gilrs = Gilrs::new().map_err(|_| "Unable to init gamepad system".to_string())?;
 
     // Create Serial Connection
     let port = serial::open("/dev/ttyACM0")
@@ -392,7 +400,7 @@ fn main() -> Result<(), Box<dyn Error>> {
 
     let events = Events::new();
 
-    let mut app = App::new(Box::new(port));
+    let mut app = App::new(Box::new(port), gilrs);
 
     loop {
         match events.next()? {
@@ -407,6 +415,5 @@ fn main() -> Result<(), Box<dyn Error>> {
 
         app.draw(&mut terminal)?;
     }
-
     Ok(())
 }

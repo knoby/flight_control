@@ -1,0 +1,45 @@
+{
+    // Use IntelliSense to learn about possible attributes.
+    // Hover to view descriptions of existing attributes.
+    // For more information, visit: https://go.microsoft.com/fwlink/?linkid=830387
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "type": "lldb",
+            "request": "launch",
+            "name": "Debug executable 'fligt_control'",
+            "cargo": {
+                "args": [
+                    "build",
+                    "--bin=fligt_control",
+                    "--package=fligt_control"
+                ],
+                "filter": {
+                    "name": "fligt_control",
+                    "kind": "bin"
+                }
+            },
+            "args": [],
+            "cwd": "${workspaceFolder}"
+        },
+        {
+            "type": "lldb",
+            "request": "launch",
+            "name": "Debug unit tests in executable 'fligt_control'",
+            "cargo": {
+                "args": [
+                    "test",
+                    "--no-run",
+                    "--bin=fligt_control",
+                    "--package=fligt_control"
+                ],
+                "filter": {
+                    "name": "fligt_control",
+                    "kind": "bin"
+                }
+            },
+            "args": [],
+            "cwd": "${workspaceFolder}"
+        }
+    ]
+}

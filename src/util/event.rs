@@ -1,9 +1,5 @@
 use std::io;
 use std::sync::mpsc;
-use std::sync::{
-    atomic::{AtomicBool, Ordering},
-    Arc,
-};
 use std::thread;
 use std::time::Duration;
 
