@@ -18,9 +18,9 @@ pub struct Model {
     btn_refresh: gtk::Button,
     serial: Option<Box<dyn SerialPort>>,
     app_reciver: Option<relm::Channel<Message>>,
-    app_sender: Option<std::sync::mpsc::Sender<Vec<u8>>>,
+    app_sender: Option<std::sync::mpsc::Sender<copter_com::Message>>,
     relm: relm::Relm<Widget>,
-    led: bool,
+    ping_sequence: u16,
 }
 
 #[derive(Msg)]
@@ -30,6 +30,7 @@ pub enum Message {
     RefreshDeviceList,
     ConnectionError,
     KeepAlive,
+    RecivedMsg(copter_com::Message),
 }
 
 pub struct Widget {
@@ -84,16 +85,22 @@ impl Widget {
             let stream = self.model.relm.stream().clone();
             let (app_reciver, thread_sender) =
                 relm::Channel::<Message>::new(move |msg| stream.emit(msg));
-            let (app_sender, thread_reciver) = std::sync::mpsc::channel::<Vec<u8>>();
+            let (app_sender, thread_reciver) = std::sync::mpsc::channel::<copter_com::Message>();
 
             std::thread::spawn(move || {
                 let timeout = std::time::Duration::from_millis(50);
+                let mut buffer = [0; 128];
+                let mut recive_msg = false;
+                let mut length = None;
+                let mut msg = Vec::new();
                 loop {
                     // ====
                     // check for new message to send
+                    // ====
                     match thread_reciver.recv_timeout(timeout) {
-                        Ok(buffer) => {
+                        Ok(msg) => {
                             // try to send the data
+                            let buffer = msg.serialize();
                             if serial.write_all(buffer.as_ref()).is_err() {
                                 thread_sender.send(Message::ConnectionError).ok(); // we don't handle the error because the thread ends here
                                 break; // on error drop connection
@@ -104,12 +111,51 @@ impl Widget {
                         }
                         Err(std::sync::mpsc::RecvTimeoutError::Timeout) => (), // repeat the loop
                     }
+                    // ====
+                    // check for incoming bytes
+                    // ====
+                    while let Ok(byte_count) = serial.read(&mut buffer) {
+                        for &val in buffer[..byte_count].iter() {
+                            // Wait for start byte
+                            if (val == copter_com::START_BYTE) && !recive_msg {
+                                recive_msg = true;
+                                length = None;
+                                msg.clear();
+                            }
+
+                            // Add byte to buffer
+                            if recive_msg {
+                                msg.push(val);
+                            }
+
+                            // Check length byte
+                            if msg.len() == 2 {
+                                if val <= 30 {
+                                    length = Some(val);
+                                } else {
+                                    recive_msg = false;
+                                }
+                            }
+
+                            // Check end of message
+                            if let Some(len) = length {
+                                if (len as u16 + 2) == (msg.len() as u16) {
+                                    if let Ok(msg) = copter_com::Message::parse(&msg) {
+                                        thread_sender.send(Message::RecivedMsg(msg));
+                                    }
+                                    recive_msg = false;
+                                    length = None;
+                                }
+                            }
+                        }
+                    }
                 }
             });
-
             // save the sender/reciver in the model
             self.model.app_reciver = Some(app_reciver);
             self.model.app_sender = Some(app_sender);
+            // Set Ping Sequcne
+            self.model.ping_sequence = 0;
         } else {
             self.model.relm.stream().emit(Message::ConnectionError);
         }
@@ -174,7 +220,7 @@ impl relm::Update for Widget {
             btn_connect,
             btn_disconnect,
             btn_refresh,
-            led: false,
+            ping_sequence: 0,
         }
     }
 
@@ -195,14 +241,16 @@ impl relm::Update for Widget {
             }
             Message::KeepAlive => {
                 if let Some(sender) = &mut self.model.app_sender {
-                    let msg = if self.model.led {
-                        b"SET Led=FALSE\n\r".to_vec()
-                    } else {
-                        b"SET Led=TRUE\n\r".to_vec()
-                    };
-                    sender.send(msg).ok();
-                    self.model.led = !self.model.led;
+                    sender
+                        .send(copter_com::Message::Ping(copter_com::Ping {
+                            sequence: self.model.ping_sequence,
+                        }))
+                        .ok();
+                    self.model.ping_sequence += 1;
                 }
+            }
+            Message::RecivedMsg(msg) => {
+                println!("Recived Message: {:?}", msg);
             }
         };
     }

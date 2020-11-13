@@ -18,8 +18,9 @@ pub enum Message {
 
 pub struct App {
     window: Window,
+    _graph: relm::Component<widgets::graph::Widget>,
     _connection: relm::Component<widgets::connection::Widget>,
-    _model: Model,
+    model: Model,
 }
 
 impl Update for App {
@@ -45,14 +46,17 @@ impl Widget for App {
         self.window.clone()
     }
 
-    fn view(relm: &Relm<Self>, _model: Self::Model) -> Self {
+    fn view(relm: &Relm<Self>, model: Self::Model) -> Self {
         let glade_src = include_str!("../../gtk_ui/main.glade");
         let builder = gtk::Builder::from_string(glade_src);
 
         let window: Window = builder.get_object("window").unwrap();
         let control_box: gtk::Box = builder.get_object("BoxControl").unwrap();
+        let graph_box: gtk::Box = builder.get_object("BoxGraph").unwrap();
 
         let _connection = control_box.add_widget::<widgets::connection::Widget>(builder);
+        let _graph = graph_box.add_widget::<widgets::graph::Widget>(());
+        graph_box.set_child_expand(&graph_box.get_children()[0], true);
 
         window.show_all();
 
@@ -66,8 +70,9 @@ impl Widget for App {
         window.show_all();
 
         App {
-            _model,
+            model,
             window,
+            _graph,
             _connection,
         }
     }
