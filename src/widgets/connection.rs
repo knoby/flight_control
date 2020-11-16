@@ -141,7 +141,7 @@ impl Widget {
                             if let Some(len) = length {
                                 if (len as u16 + 2) == (msg.len() as u16) {
                                     if let Ok(msg) = copter_com::Message::parse(&msg) {
-                                        thread_sender.send(Message::RecivedMsg(msg));
+                                        thread_sender.send(Message::RecivedMsg(msg)).ok();
                                     }
                                     recive_msg = false;
                                     length = None;
@@ -203,7 +203,7 @@ impl relm::Update for Widget {
         );
 
         // keepalive event
-        relm::interval(relm.stream(), 500, || Message::KeepAlive);
+        relm::interval(relm.stream(), 1000, || Message::KeepAlive);
 
         // Get the Device list combo box
         let device_list = param.get_object("ComboSerialDevice").unwrap();
@@ -250,7 +250,7 @@ impl relm::Update for Widget {
                 }
             }
             Message::RecivedMsg(msg) => {
-                println!("Recived Message: {:?}", msg);
+                println!("Recived Message: {:#?}", msg);
             }
         };
     }
