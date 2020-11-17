@@ -31,6 +31,7 @@ pub enum Message {
     ConnectionError,
     KeepAlive,
     RecivedMsg(copter_com::Message),
+    RecivedAttitude(copter_com::Attitude),
 }
 
 pub struct Widget {
@@ -62,7 +63,7 @@ impl Widget {
 
     fn connect(&mut self) {
         let port_settings = serialport::SerialPortSettings {
-            baud_rate: 9600,
+            baud_rate: 38400,
             data_bits: DataBits::Eight,
             flow_control: FlowControl::None,
             parity: Parity::None,
@@ -81,10 +82,21 @@ impl Widget {
             .get_active_text()
             .unwrap_or_else(|| "".into());
         if let Ok(mut serial) = serialport::open_with_settings(&port, &port_settings) {
+            // Clear In/Out buffer
+            let mut buffer = [0; 8];
+            while let Ok(_) = serial.read(&mut buffer) {}
+            serial.flush();
             // Create the channels from the thread and to the thread
             let stream = self.model.relm.stream().clone();
             let (app_reciver, thread_sender) =
-                relm::Channel::<Message>::new(move |msg| stream.emit(msg));
+                relm::Channel::<Message>::new(move |msg| match msg {
+                    Message::RecivedMsg(msg) => {
+                        if let copter_com::Message::Attitude(data) = msg {
+                            stream.emit(Message::RecivedAttitude(data));
+                        }
+                    }
+                    _ => stream.emit(msg),
+                });
             let (app_sender, thread_reciver) = std::sync::mpsc::channel::<copter_com::Message>();
 
             std::thread::spawn(move || {
@@ -250,8 +262,11 @@ impl relm::Update for Widget {
                 }
             }
             Message::RecivedMsg(msg) => {
-                println!("Recived Message: {:#?}", msg);
+                if let copter_com::Message::Attitude(data) = msg {
+                    println!("{}", data.timestamp)
+                }
             }
+            Message::RecivedAttitude(_) => (),
         };
     }
 }

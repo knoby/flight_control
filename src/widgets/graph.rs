@@ -26,6 +26,8 @@ pub struct Model {
 #[derive(Msg)]
 pub enum Message {
     Draw,
+    AddAngle(u32, f32, f32, f32),
+    Clear,
 }
 
 pub struct Widget {
@@ -75,18 +77,24 @@ impl Widget {
                 x_max = std::f64::MIN;
                 y_min = min;
                 y_max = max;
+                for series in self.model.data.iter() {
+                    for point in series.data.iter() {
+                        x_min = x_min.min(point.x);
+                        x_max = x_max.max(point.x);
+                    }
+                }
             } else {
                 x_min = std::f64::MAX;
                 x_max = std::f64::MIN;
                 y_min = std::f64::MAX;
                 y_max = std::f64::MIN;
-            }
-            for series in self.model.data.iter() {
-                for point in series.data.iter() {
-                    x_min = x_min.min(point.x);
-                    x_max = x_max.max(point.x);
-                    y_min = y_min.min(point.y);
-                    y_max = y_max.max(point.y);
+                for series in self.model.data.iter() {
+                    for point in series.data.iter() {
+                        x_min = x_min.min(point.x);
+                        x_max = x_max.max(point.x);
+                        y_min = y_min.min(point.y);
+                        y_max = y_max.max(point.y);
+                    }
                 }
             }
             // Check if min==max
@@ -111,13 +119,13 @@ impl Widget {
                 if !series.data.is_empty() {
                     cx.move_to(
                         x + (x_offset + series.data[0].x) * x_scaling,
-                        y + h - (y_offset + series.data[0].y) * y_scaling,
+                        y + h - (y_offset + series.data[0].y.min(y_max).max(y_min)) * y_scaling,
                     );
                 }
                 for point in series.data.iter().skip(1) {
                     cx.line_to(
                         x + (x_offset + point.x) * x_scaling,
-                        y + h - (y_offset + point.y) * y_scaling,
+                        y + h - (y_offset + point.y.min(y_max).max(y_min)) * y_scaling,
                     );
                 }
                 cx.stroke();
@@ -137,35 +145,26 @@ impl relm::Update for Widget {
         // Create some sample data
         let mut data: Vec<DataSeries> = Vec::new();
 
-        // sin(x) for x = -2*pi .. 2*pi
-        let mut sin_series = Vec::new();
-        for n in 0..200 {
-            let x = 4.0 * std::f64::consts::PI / 200.0 * n as f64 - 2.0 * std::f64::consts::PI;
-            let y = x.sin();
-            sin_series.push(DataPoint { x, y });
-        }
         data.push(DataSeries {
-            data: sin_series,
-            color: (0.0, 1.0, 0.0),
-            label: "Sin(x)".to_string(),
-        });
-        // sin(x) for x = -1*pi .. 5*pi
-        let mut cos_series = Vec::new();
-        for n in 0..200 {
-            let x = 6.0 * std::f64::consts::PI / 200.0 * n as f64 - 1.0 * std::f64::consts::PI;
-            let y = x.cos();
-            cos_series.push(DataPoint { x, y });
-        }
-        data.push(DataSeries {
-            data: cos_series,
+            data: Vec::new(),
             color: (1.0, 0.0, 0.0),
-            label: "Cos(x)".to_string(),
+            label: "Roll [°]".to_string(),
+        });
+        data.push(DataSeries {
+            data: Vec::new(),
+            color: (0.0, 1.0, 0.0),
+            label: "Pitch [°]".to_string(),
+        });
+        data.push(DataSeries {
+            data: Vec::new(),
+            color: (0.0, 0.0, 1.0),
+            label: "Yaw[°]".to_string(),
         });
 
         Self::Model {
             draw_handler,
             data,
-            min_max: Some((-1.5, 6.0)),
+            min_max: Some((-25.0, 25.0)),
         }
     }
 
@@ -176,6 +175,30 @@ impl relm::Update for Widget {
                 let width = allocation.width;
                 let height = allocation.height;
                 self.draw_background(width, height)
+            }
+            Message::Clear => {
+                for data in self.model.data.iter_mut() {
+                    data.data.clear();
+                }
+            }
+            Message::AddAngle(time, roll, pitch, yaw) => {
+                self.model.data[0].data.push(DataPoint {
+                    x: time as f64,
+                    y: roll as f64,
+                });
+                self.model.data[1].data.push(DataPoint {
+                    x: time as f64,
+                    y: pitch as f64,
+                });
+                self.model.data[2].data.push(DataPoint {
+                    x: time as f64,
+                    y: yaw as f64,
+                });
+                if self.model.data[0].data.len() >= 200 {
+                    for data in self.model.data.iter_mut() {
+                        data.data.remove(0);
+                    }
+                }
             }
         }
     }

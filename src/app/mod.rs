@@ -67,6 +67,17 @@ impl Widget for App {
             return (Some(Message::Quit), Inhibit(false))
         );
 
+        connect!(
+            _connection@widgets::connection::Message::RecivedAttitude(ref data),
+            _graph,
+            widgets::graph::Message::AddAngle(data.timestamp, data.roll/std::f32::consts::PI*180.0, data.pitch/std::f32::consts::PI*180.0, data.yaw/std::f32::consts::PI*180.0)
+        );
+        connect!(
+            _connection@widgets::connection::Message::Connect,
+            _graph,
+            widgets::graph::Message::Clear
+        );
+
         window.show_all();
 
         App {
