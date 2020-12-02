@@ -6,6 +6,7 @@ use relm_derive::Msg;
 use gtk::prelude::*;
 use gtk::DrawingArea;
 
+#[derive(Debug)]
 pub struct DataPoint {
     x: f64,
     y: f64,
@@ -14,7 +15,7 @@ pub struct DataPoint {
 struct DataSeries {
     data: Vec<DataPoint>,
     color: (f64, f64, f64),
-    label: String,
+    _label: String,
 }
 
 pub struct Model {
@@ -148,23 +149,23 @@ impl relm::Update for Widget {
         data.push(DataSeries {
             data: Vec::new(),
             color: (1.0, 0.0, 0.0),
-            label: "Roll [°]".to_string(),
+            _label: "Roll [°]".to_string(),
         });
         data.push(DataSeries {
             data: Vec::new(),
             color: (0.0, 1.0, 0.0),
-            label: "Pitch [°]".to_string(),
+            _label: "Pitch [°]".to_string(),
         });
         data.push(DataSeries {
             data: Vec::new(),
             color: (0.0, 0.0, 1.0),
-            label: "Yaw[°]".to_string(),
+            _label: "Yaw[°]".to_string(),
         });
 
         Self::Model {
             draw_handler,
             data,
-            min_max: Some((-25.0, 25.0)),
+            min_max: None,
         }
     }
 
@@ -214,6 +215,7 @@ impl relm::Widget for Widget {
     fn view(relm: &Relm<Self>, mut model: Self::Model) -> Self {
         // Create the drawing area
         let drawing_area = DrawingArea::new();
+        drawing_area.set_size_request(400, 300);
         model.draw_handler.init(&drawing_area);
 
         // Connect the draw event

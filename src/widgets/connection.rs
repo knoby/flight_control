@@ -30,6 +30,7 @@ pub enum Message {
     RefreshDeviceList,
     ConnectionError,
     KeepAlive,
+    SendMessage(copter_com::Message),
     RecivedMsg(copter_com::Message),
     RecivedAttitude(copter_com::Attitude),
 }
@@ -84,8 +85,8 @@ impl Widget {
         if let Ok(mut serial) = serialport::open_with_settings(&port, &port_settings) {
             // Clear In/Out buffer
             let mut buffer = [0; 8];
-            while let Ok(_) = serial.read(&mut buffer) {}
-            serial.flush();
+            while serial.read(&mut buffer).is_ok() {}
+            serial.flush().ok();
             // Create the channels from the thread and to the thread
             let stream = self.model.relm.stream().clone();
             let (app_reciver, thread_sender) =
@@ -261,11 +262,12 @@ impl relm::Update for Widget {
                     self.model.ping_sequence += 1;
                 }
             }
-            Message::RecivedMsg(msg) => {
-                if let copter_com::Message::Attitude(data) = msg {
-                    println!("{}", data.timestamp)
+            Message::SendMessage(msg) => {
+                if let Some(sender) = &mut self.model.app_sender {
+                    sender.send(msg).ok();
                 }
             }
+            Message::RecivedMsg(_) => (),
             Message::RecivedAttitude(_) => (),
         };
     }
@@ -273,12 +275,11 @@ impl relm::Update for Widget {
 
 impl relm::Widget for Widget {
     type Root = Frame;
-
     fn root(&self) -> Self::Root {
         self.model.root.clone()
     }
 
-    fn view(relm: &Relm<Self>, model: Self::Model) -> Self {
+    fn view(_relm: &Relm<Self>, model: Self::Model) -> Self {
         Self { model }
     }
 }
